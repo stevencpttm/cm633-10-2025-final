@@ -54,18 +54,20 @@ export default function Home() {
     const currentCandle = marketData[index];
     const previousCandles = marketData.slice(Math.max(0, index - 10), index);
 
-    await getAIDecision(
-      "modelA",
-      AI_MODELS.modelA.code,
-      currentCandle,
-      previousCandles
-    );
-    await getAIDecision(
-      "modelB",
-      AI_MODELS.modelB.code,
-      currentCandle,
-      previousCandles
-    );
+    await Promise.all([
+      getAIDecision(
+        "modelA",
+        AI_MODELS.modelA.code,
+        currentCandle,
+        previousCandles
+      ),
+      getAIDecision(
+        "modelB",
+        AI_MODELS.modelB.code,
+        currentCandle,
+        previousCandles
+      ),
+    ]);
   }
 
   async function getAIDecision(aiName, model, currentCandle, previousCandles) {
@@ -95,30 +97,54 @@ export default function Home() {
     const decision = await response.json();
 
     // TODO: execute the trade decision
-    executeTrade(aiName, decision.action, currentCandle);
+    executeTrade(aiName, decision, currentCandle);
   }
 
   function executeTrade(aiName, decision, currentCandle) {
     setAiPortfolios((prev) => {
       const portfolio = { ...prev[aiName] };
 
-      const randomPrice = Math.round(Math.random() * 100 + 200); // Random from 200 to 300
-      portfolio.cash += randomPrice;
-      portfolio.shares += 1;
+      if (decision.action === "buy") {
+        const cost = decision.amount * currentCandle.close;
+
+        if (cost <= portfolio.cash) {
+          portfolio.cash -= cost;
+          portfolio.shares += decision.amount;
+        }
+      } else if (decision.action === "sell") {
+        if (decision.amount <= portfolio.shares) {
+          portfolio.cash += decision.amount * currentCandle.close;
+          portfolio.shares -= decision.amount;
+        }
+      }
+
       portfolio.history = [
         ...portfolio.history,
         {
           timestamp: new Date(),
-          value: portfolio.cash,
+          value: portfolio.cash + portfolio.shares * currentCandle.close,
         },
       ];
-      portfolio.lastPrice = randomPrice;
+
+      portfolio.lastPrice = currentCandle.close;
 
       return {
         ...prev,
         [aiName]: portfolio,
       };
     });
+
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        ai: aiName,
+        timestamp: Date.now(),
+        action: decision.action,
+        amount: decision.amount,
+        price: currentCandle.close,
+        message: decision.message,
+      },
+    ]);
   }
 
   function handlePlayPause() {
